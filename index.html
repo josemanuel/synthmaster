@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Eurorack Module · Synthesizer</title>
+<title>MIDI Master Pro · Synthesizer</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
 <style>
 /* ============================================================
@@ -97,7 +97,7 @@ body {
 
 /* Row: oscillators side by side + noise */
 .row-osc   { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-/* Row: mixer + ring mod + filter */
+/* Row: mixer + filter */
 .row-vcf   { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 10px; }
 /* Row: VCA + arp + presets */
 .row-bot   { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 10px; }
@@ -375,8 +375,8 @@ input[type=number]:focus { border-color:var(--accent); }
 }
 .oct-pill.sel { background:var(--accent); color:#000; border-color:var(--accent); }
 
-/* ring mod source toggle */
-.ring-src { display:flex; gap:4px; }
+
+
 
 /* PWM indicator */
 .pwm-row { margin-top:6px; }
@@ -542,7 +542,7 @@ input[type=number]:focus { border-color:var(--accent); }
   <!-- TOP BAR -->
   <div class="top-bar">
     <div>
-      <div class="app-title">EURORACK · MODULE</div>
+      <div class="app-title">SYNTHMASTER · MODULE</div>
       <div class="app-sub">Professional Eurorack-Style Synthesizer · Web Audio API</div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -715,27 +715,6 @@ input[type=number]:focus { border-color:var(--accent); }
           <input type="range" id="noise-level" min="0" max="1" step="0.01" value="0" style="width:100%;" oninput="setNoiseLevel(this.value)"/>
           <span class="ctrl-val" id="noise-level-val">0%</span>
         </div>
-        <div class="sep"></div>
-        <!-- Ring Mod placed here for space efficiency -->
-        <div class="mod-header" style="margin-top:4px;">
-          <div class="mod-title"><span style="color:var(--accent4);">RING MOD</span></div>
-          <div style="display:flex;gap:5px;align-items:center;">
-            <div id="ring-en-btn" class="led-btn" data-tip="Enable Ring Modulator" onclick="toggleRing()">RM</div>
-            <div class="mod-badge purple">×</div>
-          </div>
-        </div>
-        <div class="ctrl-col" style="margin-bottom:8px;">
-          <div class="ctrl-label">SOURCE</div>
-          <div class="toggle-pill">
-            <button class="sel purple" id="ring-src-o1o2" onclick="setRingSrc('osc1xosc2',this)">O1×O2</button>
-            <button id="ring-src-nxo1" onclick="setRingSrc('noisexosc1',this)">N×O1</button>
-          </div>
-        </div>
-        <div class="ctrl-col" data-tip="Ring modulation depth 0–100%">
-          <div class="ctrl-label">AMOUNT</div>
-          <input type="range" id="ring-amount" min="0" max="1" step="0.01" value="0.5" style="width:100%;" oninput="setRingAmount(this.value)"/>
-          <span class="ctrl-val" id="ring-amount-val">50%</span>
-        </div>
       </div>
     </div>
 
@@ -776,15 +755,7 @@ input[type=number]:focus { border-color:var(--accent); }
             </div>
             <div class="mix-val" id="mval-noise">0</div>
           </div>
-          <!-- RING -->
-          <div class="mix-ch">
-            <div class="mix-label">RING</div>
-            <div class="mix-fader-track" id="mfader-ring" data-ch="ring">
-              <div class="mix-fader-fill" id="mfill-ring" style="height:50%;"></div>
-              <div class="mix-fader-thumb" id="mthumb-ring" style="bottom:calc(50% - 3px);"></div>
-            </div>
-            <div class="mix-val" id="mval-ring">50</div>
-          </div>
+
           <!-- MASTER -->
           <div class="mix-ch" style="border-color:rgba(0,255,157,.25);">
             <div class="mix-label" style="color:var(--accent);">MSTR</div>
@@ -1016,7 +987,7 @@ input[type=number]:focus { border-color:var(--accent); }
     </div>
   </div>
 
-  <div id="status-bar">EURORACK MODULE v2.0 · Web Audio API · <span id="ctx-state" style="color:var(--accent);">SUSPENDED</span></div>
+  <div id="status-bar">SYNTHMASTER MODULE v2.0 · Web Audio API · <span id="ctx-state" style="color:var(--accent);">SUSPENDED</span></div>
 
 
     <!-- ROW 4: FX -->
@@ -1225,22 +1196,16 @@ limiterNode.connect(AC.destination);
 // ---- MIXER GAINS (per-source, pre-drive) ----
 // NOTE: Per voice, we create individual osc gains that feed voiceBus → driveGain
 // These mixer gains scale the base per-source level
+// Mixer level reference gains (actual audio routing is per-voice in noteOn)
 const mixGains = {
-  osc1:   AC.createGain(),
-  osc2:   AC.createGain(),
-  noise:  AC.createGain(),
-  ring:   AC.createGain(),
+  osc1:  AC.createGain(),
+  osc2:  AC.createGain(),
+  noise: AC.createGain(),
 };
 mixGains.osc1.gain.value  = 0.8;
 mixGains.osc2.gain.value  = 0.7;
-mixGains.noise.gain.value = 0.0;  // noise is routed per-voice (see noteOn)
-mixGains.ring.gain.value  = 0.5;
-// OSC1, OSC2, Ring go through driveGain (per-voice routing happens in noteOn)
-// Noise does NOT connect globally here — it gets per-voice taps in noteOn
-mixGains.osc1.connect(driveGain);  // these are just level references, not routing
-mixGains.osc2.connect(driveGain);
-// mixGains.noise and mixGains.ring are NOT connected globally
-// They are used as level-reference nodes; actual audio routing is per-voice in noteOn
+mixGains.noise.gain.value = 0.0;
+// These nodes are used as level references only — audio flows per-voice
 
 // ---- NOISE GENERATOR ----
 let noiseSource = null;
@@ -1250,7 +1215,7 @@ noiseGainNode.gain.value = 0;
 
 // ---- VOICE MANAGEMENT ----
 // Each voice has its own VCA gain envelope and per-voice VCF frequency automation
-// activeVoices[noteNum] = { osc1, osc2, vcaGain, vcfFilter, ringNode, ... }
+// activeVoices[noteNum] = { osc1, osc2, vcaGain, vcfFilt, noiseTap, ... }
 const activeVoices = {};
 
 // Dynamic polyphony limiter: scale gain based on voice count to prevent clipping
@@ -1292,14 +1257,13 @@ const S = {
     { wave:'sawtooth',oct:0, semi:0, detune:0, level:0.7, mute:false, pw:0.5 },
   ],
   noise: { type:'white', level:0, mute:false },
-  ring:  { enabled:false, src:'osc1xosc2', amount:0.5 },
   // VCF
   vcf: { type:'lowpass', slope:12, cutoff:8000, reso:1, drive:1, envAmt:0.5,
          atk:0.01, dec:0.3, sus:0.5, rel:0.5 },
   // VCA
   vca: { atk:0.01, dec:0.2, sus:0.7, rel:0.4 },
   // Mixer
-  mix: { osc1:0.8, osc2:0.7, noise:0, ring:0.5, master:0.8 },
+  mix: { osc1:0.8, osc2:0.7, noise:0, master:0.8 },
   // Global
   masterVol: 0.75,
   velSens: 0.8,
@@ -1393,16 +1357,23 @@ function noteOn(midiNote, velocity) {
   if (!S.audioReady) return;
   if (activeVoices[midiNote]) noteOff(midiNote);
 
-  const vel   = S.velSens > 0 ? (velocity / 127) * S.velSens + (1 - S.velSens) : 1;
-  const now   = AC.currentTime;
+  const vel = S.velSens > 0 ? (velocity / 127) * S.velSens + (1 - S.velSens) : 1;
+  const now = AC.currentTime;
   const voice = {};
 
-  // Count AFTER this voice is added
-  const newCount = Object.keys(activeVoices).length + 1;
+  // ---- POLYPHONY SCALING: 1/sqrt(N) per voice ----
+  const newCount  = Object.keys(activeVoices).length + 1;
   const polyScale = polyGainForCount(newCount);
-
-  // Rescale all already-playing voices to match new count (scale from their baseGain)
   rescaleActiveVoices(newCount);
+  voice.baseGain   = vel;
+  voice.scaledGain = vel * polyScale;
+
+  // ---- PER-VOICE VCA GAIN ----
+  const vcaGainNode = AC.createGain();
+  vcaGainNode.gain.setValueAtTime(0.0001, now);
+  vcaGainNode.gain.linearRampToValueAtTime(vel * polyScale,             now + S.vca.atk);
+  vcaGainNode.gain.linearRampToValueAtTime(vel * S.vca.sus * polyScale, now + S.vca.atk + S.vca.dec);
+  voice.vcaGain = vcaGainNode;
 
   // ---- PER-VOICE VCF FILTER ----
   const vcfFilt = AC.createBiquadFilter();
@@ -1411,7 +1382,6 @@ function noteOn(midiNote, velocity) {
   vcfFilt.Q.value         = S.vcf.reso;
   voice.vcfFilt = vcfFilt;
 
-  // Apply VCF envelope per-voice
   const baseCutoff = S.vcf.cutoff;
   const envRange   = baseCutoff * Math.abs(S.vcf.envAmt) * 3 * (S.vcf.envAmt < 0 ? -1 : 1);
   vcfFilt.frequency.setValueAtTime(baseCutoff, now);
@@ -1420,121 +1390,63 @@ function noteOn(midiNote, velocity) {
   vcfFilt.frequency.linearRampToValueAtTime(
     Math.max(20, Math.min(20000, baseCutoff + envRange * S.vcf.sus)), now + S.vcf.atk + S.vcf.dec);
 
-  // ---- PER-VOICE VCA GAIN ----
-  // baseGain = unscaled velocity amplitude (used for rescaling later)
-  voice.baseGain  = vel;          // full unscaled target (at sustain: vel * sus)
-  voice.scaledGain = vel * polyScale;  // current target after poly scaling
-
-  const vcaGainNode = AC.createGain();
-  vcaGainNode.gain.setValueAtTime(0.0001, now);
-  vcaGainNode.gain.linearRampToValueAtTime(vel * polyScale,             now + S.vca.atk);
-  vcaGainNode.gain.linearRampToValueAtTime(vel * S.vca.sus * polyScale, now + S.vca.atk + S.vca.dec);
-  voice.vcaGain = vcaGainNode;
-
-  // ---- PER-VOICE PRE-MIX BUS ----
-  const voicePreBus = AC.createGain();
-  voicePreBus.gain.value = 1;
-  voice.preBus = voicePreBus;
-
-  // Route: voicePreBus → vcfFilt → vcaGainNode → driveGain
-  voicePreBus.connect(vcfFilt);
+  // ---- PER-VOICE SUMMING BUS ----
+  // Chain: sumBus → vcfFilt → vcaGainNode → driveGain → (shared FX chain)
+  const sumBus = AC.createGain();
+  sumBus.gain.value = 1;
+  voice.preBus = sumBus;
+  sumBus.connect(vcfFilt);
   vcfFilt.connect(vcaGainNode);
   vcaGainNode.connect(driveGain);
 
-  // ---- BUILD OSC NODES (do not connect yet — routing depends on ring mod state) ----
-  const buildOsc = (oscIdx) => {
-    const oscS = S.osc[oscIdx];
-    if (oscS.mute) return null;
-    const freq = midiNoteToFreq(midiNote + oscS.semi + oscS.oct * 12);
-    let osc;
-    if (oscS.wave === 'pwm') {
-      osc = makePWMOsc(freq, oscS.pw, oscS.detune);
+  // ---- OSC 1 ----
+  if (!S.osc[1].mute) {
+    const freq = midiNoteToFreq(midiNote + S.osc[1].semi + S.osc[1].oct * 12);
+    let osc1;
+    if (S.osc[1].wave === 'pwm') {
+      osc1 = makePWMOsc(freq, S.osc[1].pw, S.osc[1].detune);
     } else {
-      osc = AC.createOscillator();
-      osc.type = oscS.wave;
-      osc.frequency.value = freq;
-      osc.detune.value = oscS.detune;
+      osc1 = AC.createOscillator();
+      osc1.type = S.osc[1].wave;
+      osc1.frequency.value = freq;
+      osc1.detune.value = S.osc[1].detune;
     }
-    const g = AC.createGain();
-    // Level from OSC panel * mixer fader
-    g.gain.value = oscS.level * (oscIdx===1 ? mixGains.osc1.gain.value : mixGains.osc2.gain.value);
-    osc.connect(g);
-    osc.start(now);
-    return { osc, gain: g };
-  };
-
-  const b1 = buildOsc(1);
-  const b2 = buildOsc(2);
-  if (b1) { voice.osc1 = b1.osc; voice.osc1gain = b1.gain; }
-  if (b2) { voice.osc2 = b2.osc; voice.osc2gain = b2.gain; }
-
-  // ---- ROUTING: normal (no ring mod) vs ring mod ----
-  if (!S.ring.enabled) {
-    // NORMAL: both oscillators go straight to the voice bus
-    if (b1) b1.gain.connect(voicePreBus);
-    if (b2) b2.gain.connect(voicePreBus);
-
-  } else {
-    // RING MOD: carrier × modulator, true AM multiplication
-    // carrier goes through ring, modulator ALSO goes direct (wet mix option)
-    // Uses AudioParam modulation technique:
-    //   ringNode.gain.value = 1.0 (not 0!) 
-    //   modulator connected to ringNode.gain AudioParam
-    //   output = carrier * (1 + modulator_signal) — this is AM
-    //   For true RM (no carrier leakthrough), we subtract the carrier:
-    //   We accomplish this by using gain=0 for the unmodulated path
-    //   and only passing the multiplied result.
-    //
-    // Correct implementation:
-    //   ringMul.gain.value = 0  ← static base
-    //   modulator → ringMul.gain  ← audio-rate adds to base
-    //   carrier → ringMul  ← carrier signal gets multiplied by (0 + mod)
-    //   = true ring mod (product only, no carrier leakthrough)
-    //
-    // The carrier is NOT connected to voicePreBus directly.
-    // The modulator IS connected to voicePreBus directly (at scaled level).
-
-    const carrierBuf = S.ring.src === 'osc1xosc2' ? b1 : b2;
-    const modBuf     = S.ring.src === 'osc1xosc2' ? b2 : null; // null = noise
-
-    if (carrierBuf) {
-      const ringMul = AC.createGain();
-      ringMul.gain.value = 0;  // base = 0, modulator will drive this AudioParam
-
-      // Carrier signal goes into the gain node
-      carrierBuf.gain.connect(ringMul);
-
-      // Modulator drives the gain AudioParam (audio-rate modulation)
-      if (modBuf) {
-        modBuf.gain.connect(ringMul.gain);
-      } else {
-        noiseGainNode.connect(ringMul.gain);
-      }
-
-      // Ring output gain (the "amount" knob)
-      const ringOut = AC.createGain();
-      ringOut.gain.value = S.ring.amount;
-      ringMul.connect(ringOut);
-      ringOut.connect(voicePreBus);
-
-      voice.ringMul = ringMul;
-      voice.ringOut = ringOut;
-    }
-
-    // Modulator also goes direct to bus (contributes normal OSC sound + ring product)
-    if (modBuf) modBuf.gain.connect(voicePreBus);
-    // If no carrierBuf but osc is available, connect it directly
-    if (!carrierBuf && b1) b1.gain.connect(voicePreBus);
-    if (!carrierBuf && b2 && !modBuf) b2.gain.connect(voicePreBus);
+    const g1 = AC.createGain();
+    g1.gain.value = S.osc[1].level * mixGains.osc1.gain.value;
+    osc1.connect(g1);
+    g1.connect(sumBus);
+    osc1.start(now);
+    voice.osc1 = osc1;
+    voice.osc1gain = g1;
   }
 
-  // ---- PER-VOICE NOISE TAP ----
-  // Noise goes through per-voice VCA (same as oscillators) so it respects ADSR
+  // ---- OSC 2 ----
+  if (!S.osc[2].mute) {
+    const freq2 = midiNoteToFreq(midiNote + S.osc[2].semi + S.osc[2].oct * 12);
+    let osc2;
+    if (S.osc[2].wave === 'pwm') {
+      osc2 = makePWMOsc(freq2, S.osc[2].pw, S.osc[2].detune);
+    } else {
+      osc2 = AC.createOscillator();
+      osc2.type = S.osc[2].wave;
+      osc2.frequency.value = freq2;
+      osc2.detune.value = S.osc[2].detune;
+    }
+    const g2 = AC.createGain();
+    g2.gain.value = S.osc[2].level * mixGains.osc2.gain.value;
+    osc2.connect(g2);
+    g2.connect(sumBus);
+    osc2.start(now);
+    voice.osc2 = osc2;
+    voice.osc2gain = g2;
+  }
+
+  // ---- NOISE (per-voice tap — respects VCA envelope) ----
   if (!S.noise.mute && S.noise.level > 0) {
     const noiseTap = AC.createGain();
     noiseTap.gain.value = S.noise.level;
     noiseGainNode.connect(noiseTap);
-    noiseTap.connect(voicePreBus);
+    noiseTap.connect(sumBus);
     voice.noiseTap = noiseTap;
   }
 
@@ -1580,7 +1492,7 @@ function noteOff(midiNote) {
   // Disconnect after full release
   setTimeout(() => {
     try {
-      ['preBus','vcfFilt','vcaGain','osc1gain','osc2gain','ringMul','ringOut','noiseTap'].forEach(k => {
+      ['preBus','vcfFilt','vcaGain','osc1gain','osc2gain','noiseTap'].forEach(k => {
         try { if (voice[k]) voice[k].disconnect(); } catch(e) {}
       });
     } catch(e){}
@@ -1646,7 +1558,7 @@ function panicStop() {
       try { o.stop(now); } catch(e){}
     });
     // Disconnect nodes
-    ['preBus','vcfFilt','vcaGain','osc1gain','osc2gain','ringMul','ringOut','noiseTap'].forEach(k => {
+    ['preBus','vcfFilt','vcaGain','osc1gain','osc2gain','noiseTap'].forEach(k => {
       try { if(v[k]) v[k].disconnect(); } catch(e){}
     });
   });
@@ -1736,28 +1648,7 @@ function toggleNoiseMute() {
   noiseGainNode.gain.value = S.noise.mute ? 0 : S.noise.level;
 }
 
-// ================================================================
-//  RING MOD
-// ================================================================
-function toggleRing() {
-  S.ring.enabled = !S.ring.enabled;
-  document.getElementById('ring-en-btn').classList.toggle('on', S.ring.enabled);
-}
-function setRingSrc(src, btn) {
-  S.ring.src = src;
-  document.getElementById('ring-src-o1o2').classList.remove('sel','purple');
-  document.getElementById('ring-src-nxo1').classList.remove('sel','purple');
-  btn.classList.add('sel','purple');
-}
-function setRingAmount(val) {
-  S.ring.amount = parseFloat(val);
-  document.getElementById('ring-amount-val').textContent = Math.round(val*100)+'%';
-  updateFaderUI('ring', parseFloat(val));
-  // Update active voices ring output gain in real-time
-  Object.values(activeVoices).forEach(v => {
-    if (v.ringOut) v.ringOut.gain.setTargetAtTime(parseFloat(val), AC.currentTime, 0.01);
-  });
-}
+
 
 // ================================================================
 //  VCF
@@ -1858,7 +1749,7 @@ function drawEnvelope(section) {
 //  MIXER FADERS (drag)
 // ================================================================
 function initFaders() {
-  ['osc1','osc2','noise','ring','master'].forEach(ch => {
+  ['osc1','osc2','noise','master'].forEach(ch => {
     const track = document.getElementById(`mfader-${ch}`);
     if (!track) return;
     let dragging = false;
@@ -2155,7 +2046,7 @@ let currentPresetIdx = -1;
 
 function getSnapshot() {
   return JSON.parse(JSON.stringify({
-    osc: S.osc, noise: S.noise, ring: S.ring,
+    osc: S.osc, noise: S.noise,
     vcf: {
       ...S.vcf,
       cutoffKnob: parseFloat(document.getElementById('vcf-cutoff-knob').dataset.val),
@@ -2171,7 +2062,6 @@ function getSnapshot() {
       'osc1-pw': document.getElementById('osc1-pw').value,
       'osc2-pw': document.getElementById('osc2-pw').value,
       'noise-level': document.getElementById('noise-level').value,
-      'ring-amount': document.getElementById('ring-amount').value,
       'vcf-env-amt': document.getElementById('vcf-env-amt').value,
       'vca-atk': document.getElementById('vca-atk').value,
       'vca-dec': document.getElementById('vca-dec').value,
@@ -2263,7 +2153,6 @@ function applySnapshot(p) {
   setOscLevel(1, document.getElementById('osc1-level').value);
   setOscLevel(2, document.getElementById('osc2-level').value);
   setNoiseLevel(document.getElementById('noise-level').value);
-  setRingAmount(document.getElementById('ring-amount').value);
   setVcfEnvAmt(document.getElementById('vcf-env-amt').value);
 }
 
@@ -2330,9 +2219,9 @@ function loadPresetsFromStorage() {
 function loadDefaultPresets() {
   // A few factory presets
   presets = [
-    { name:'Init Patch', sliders:{'osc1-level':'0.8','osc2-level':'0.7','noise-level':'0','ring-amount':'0.5','vcf-env-amt':'0.5','vca-atk':'0.01','vca-dec':'0.2','vca-sus':'0.7','vca-rel':'0.4','vcf-atk':'0.01','vcf-dec':'0.3','vcf-sus':'0.5','vcf-rel':'0.5','master-vol':'0.75','vel-sens':'0.8','arp-bpm':'120','arp-gate':'50'}, osc:[null,{wave:'sine',oct:0,semi:0,detune:0,level:0.8,mute:false,pw:0.5},{wave:'sawtooth',oct:0,semi:0,detune:0,level:0.7,mute:false,pw:0.5}], noise:{type:'white',level:0,mute:true}, ring:{enabled:false,src:'osc1xosc2',amount:0.5}, vcf:{type:'lowpass',slope:12,cutoff:8000,reso:1,drive:1,envAmt:0.5,atk:0.01,dec:0.3,sus:0.5,rel:0.5,cutoffKnob:8000,resoKnob:1,driveKnob:1}, vca:{atk:0.01,dec:0.2,sus:0.7,rel:0.4}, mix:{osc1:0.8,osc2:0.7,noise:0,ring:0.5,master:0.8}, masterVol:0.75, velSens:0.8, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:50,octRange:1,heldNotes:[]} },
-    { name:'Saw Pad', sliders:{'osc1-level':'0.9','osc2-level':'0.85','noise-level':'0','ring-amount':'0','vcf-env-amt':'0.3','vca-atk':'0.6','vca-dec':'0.4','vca-sus':'0.8','vca-rel':'1.2','vcf-atk':'0.5','vcf-dec':'0.5','vcf-sus':'0.6','vcf-rel':'1.0','master-vol':'0.75','vel-sens':'0.7','arp-bpm':'120','arp-gate':'80'}, osc:[null,{wave:'sawtooth',oct:0,semi:0,detune:0,level:0.9,mute:false,pw:0.5},{wave:'sawtooth',oct:0,semi:7,detune:8,level:0.85,mute:false,pw:0.5}], noise:{type:'white',level:0,mute:true}, ring:{enabled:false,src:'osc1xosc2',amount:0}, vcf:{type:'lowpass',slope:12,cutoff:2000,reso:2,drive:1,envAmt:0.3,atk:0.5,dec:0.5,sus:0.6,rel:1.0,cutoffKnob:2000,resoKnob:2,driveKnob:1}, vca:{atk:0.6,dec:0.4,sus:0.8,rel:1.2}, mix:{osc1:0.9,osc2:0.85,noise:0,ring:0,master:0.8}, masterVol:0.75, velSens:0.7, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:80,octRange:1,heldNotes:[]} },
-    { name:'Bass Growl', sliders:{'osc1-level':'1','osc2-level':'0.6','noise-level':'0.1','ring-amount':'0','vcf-env-amt':'0.8','vca-atk':'0.002','vca-dec':'0.15','vca-sus':'0.6','vca-rel':'0.2','vcf-atk':'0.005','vcf-dec':'0.2','vcf-sus':'0.3','vcf-rel':'0.2','master-vol':'0.8','vel-sens':'0.9','arp-bpm':'120','arp-gate':'50'}, osc:[null,{wave:'sawtooth',oct:-1,semi:0,detune:0,level:1,mute:false,pw:0.5},{wave:'square',oct:-1,semi:-12,detune:5,level:0.6,mute:false,pw:0.5}], noise:{type:'white',level:0.1,mute:false}, ring:{enabled:false,src:'osc1xosc2',amount:0}, vcf:{type:'lowpass',slope:24,cutoff:800,reso:8,drive:3,envAmt:0.8,atk:0.005,dec:0.2,sus:0.3,rel:0.2,cutoffKnob:800,resoKnob:8,driveKnob:3}, vca:{atk:0.002,dec:0.15,sus:0.6,rel:0.2}, mix:{osc1:1,osc2:0.6,noise:0.1,ring:0,master:0.8}, masterVol:0.8, velSens:0.9, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:50,octRange:1,heldNotes:[]} },
+    { name:'Init Patch', sliders:{'osc1-level':'0.8','osc2-level':'0.7','noise-level':'0','vcf-env-amt':'0.5','vca-atk':'0.01','vca-dec':'0.2','vca-sus':'0.7','vca-rel':'0.4','vcf-atk':'0.01','vcf-dec':'0.3','vcf-sus':'0.5','vcf-rel':'0.5','master-vol':'0.75','vel-sens':'0.8','arp-bpm':'120','arp-gate':'50'}, osc:[null,{wave:'sine',oct:0,semi:0,detune:0,level:0.8,mute:false,pw:0.5},{wave:'sawtooth',oct:0,semi:0,detune:0,level:0.7,mute:false,pw:0.5}], noise:{type:'white',level:0,mute:true}, vcf:{type:'lowpass',slope:12,cutoff:8000,reso:1,drive:1,envAmt:0.5,atk:0.01,dec:0.3,sus:0.5,rel:0.5,cutoffKnob:8000,resoKnob:1,driveKnob:1}, vca:{atk:0.01,dec:0.2,sus:0.7,rel:0.4}, mix:{osc1:0.8,osc2:0.7,noise:0,master:0.8}, masterVol:0.75, velSens:0.8, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:50,octRange:1,heldNotes:[]} },
+    { name:'Saw Pad', sliders:{'osc1-level':'0.9','osc2-level':'0.85','noise-level':'0','vcf-env-amt':'0.3','vca-atk':'0.6','vca-dec':'0.4','vca-sus':'0.8','vca-rel':'1.2','vcf-atk':'0.5','vcf-dec':'0.5','vcf-sus':'0.6','vcf-rel':'1.0','master-vol':'0.75','vel-sens':'0.7','arp-bpm':'120','arp-gate':'80'}, osc:[null,{wave:'sawtooth',oct:0,semi:0,detune:0,level:0.9,mute:false,pw:0.5},{wave:'sawtooth',oct:0,semi:7,detune:8,level:0.85,mute:false,pw:0.5}], noise:{type:'white',level:0,mute:true}, vcf:{type:'lowpass',slope:12,cutoff:2000,reso:2,drive:1,envAmt:0.3,atk:0.5,dec:0.5,sus:0.6,rel:1.0,cutoffKnob:2000,resoKnob:2,driveKnob:1}, vca:{atk:0.6,dec:0.4,sus:0.8,rel:1.2}, mix:{osc1:0.9,osc2:0.85,noise:0,master:0.8}, masterVol:0.75, velSens:0.7, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:80,octRange:1,heldNotes:[]} },
+    { name:'Bass Growl', sliders:{'osc1-level':'1','osc2-level':'0.6','noise-level':'0.1','vcf-env-amt':'0.8','vca-atk':'0.002','vca-dec':'0.15','vca-sus':'0.6','vca-rel':'0.2','vcf-atk':'0.005','vcf-dec':'0.2','vcf-sus':'0.3','vcf-rel':'0.2','master-vol':'0.8','vel-sens':'0.9','arp-bpm':'120','arp-gate':'50'}, osc:[null,{wave:'sawtooth',oct:-1,semi:0,detune:0,level:1,mute:false,pw:0.5},{wave:'square',oct:-1,semi:-12,detune:5,level:0.6,mute:false,pw:0.5}], noise:{type:'white',level:0.1,mute:false}, vcf:{type:'lowpass',slope:24,cutoff:800,reso:8,drive:3,envAmt:0.8,atk:0.005,dec:0.2,sus:0.3,rel:0.2,cutoffKnob:800,resoKnob:8,driveKnob:3}, vca:{atk:0.002,dec:0.15,sus:0.6,rel:0.2}, mix:{osc1:1,osc2:0.6,noise:0.1,master:0.8}, masterVol:0.8, velSens:0.9, arp:{enabled:false,hold:false,mode:'up',bpm:120,div:0.125,gate:50,octRange:1,heldNotes:[]} },
   ];
   renderPresetList();
 }
@@ -2801,7 +2690,6 @@ window.onload = () => {
    - Per-voice oscillators created/destroyed on noteOn/noteOff
    - Noise: ScriptProcessor (always running, gated by gain node) with white/pink toggle
    - PWM: two detuned sawtooth oscillators with polarity inversion
-   - Ring Mod: one oscillator modulates another's gain input
    - Filter envelope: applied directly to filterNode.frequency with Web Audio scheduling
    - VCA envelope: per-voice gain node with linearRampToValueAtTime
    - Arpeggiator: setInterval-based step sequencer, builds sequence from held notes
