@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Synth Master Pro · Synthesizer</title>
+<title>MIDI Master Pro · Synthesizer</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
 <style>
 /* ============================================================
@@ -450,6 +450,56 @@ input[type=number]:focus { border-color:var(--accent); }
 .fx-bypass-btn { font-size:.6rem; padding:2px 7px; border-radius:4px; border:1px solid var(--border2); background:var(--knob-bg); color:var(--text3); cursor:pointer; }
 .fx-bypass-btn.active { background:rgba(199,125,255,.15); border-color:var(--accent4); color:var(--accent4); }
 
+
+/* ---- VIRTUAL KEYBOARD ---- */
+#mod-keyboard { padding: 10px 14px 14px; }
+.vkb-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  height: 90px;
+  user-select: none;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.vkb-white {
+  position: relative;
+  width: 32px;
+  height: 90px;
+  background: linear-gradient(180deg,#e8e8e8 0%,#fff 60%);
+  border: 1px solid #999;
+  border-radius: 0 0 5px 5px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background .05s;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.vkb-white:hover   { background: linear-gradient(180deg,#d8f0e8 0%,#effffa 60%); }
+.vkb-white.pressed { background: linear-gradient(180deg,#00cc7a 0%,#00ff9d 60%); border-color: var(--accent); }
+.vkb-black {
+  position: absolute;
+  width: 20px;
+  height: 54px;
+  background: linear-gradient(180deg,#222 0%,#111 100%);
+  border-radius: 0 0 4px 4px;
+  cursor: pointer;
+  z-index: 2;
+  transition: background .05s;
+}
+.vkb-black:hover   { background: linear-gradient(180deg,#334 0%,#223 100%); }
+.vkb-black.pressed { background: linear-gradient(180deg,#004433 0%,#006644 100%); border: 1px solid var(--accent); }
+.vkb-octlabel {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .45rem;
+  color: #999;
+  pointer-events: none;
+}
+.light .vkb-white { background: linear-gradient(180deg,#ddd 0%,#fff 60%); }
+.light .vkb-black { background: linear-gradient(180deg,#222 0%,#111 100%); }
 </style>
 </head>
 <body>
@@ -1039,6 +1089,27 @@ input[type=number]:focus { border-color:var(--accent); }
       </div>
     </div>
 
+
+    <!-- ROW 5: VIRTUAL KEYBOARD -->
+    <div style="margin-top:10px;">
+      <div class="module" id="mod-keyboard">
+        <div class="mod-header">
+          <div class="mod-title"><span style="color:var(--accent2);">KEYBOARD</span> · VIRTUAL</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span style="font-size:.6rem;color:var(--text3);">OCT BASE:</span>
+            <div class="toggle-pill" id="kb-oct-pills">
+              <button onclick="setKbOct(2,this)">2</button>
+              <button class="sel blue" onclick="setKbOct(3,this)">3</button>
+              <button onclick="setKbOct(4,this)">4</button>
+              <button onclick="setKbOct(5,this)">5</button>
+            </div>
+            <div class="mod-badge blue">2½ OCT</div>
+          </div>
+        </div>
+        <div class="vkb-wrap" id="vkb-container"></div>
+      </div>
+    </div>
+
 </div><!-- /app -->
 
 <script>
@@ -1050,14 +1121,22 @@ const AC = new (window.AudioContext || window.webkitAudioContext)();
 
 // ---- MASTER / LIMITER ----
 const masterGain    = AC.createGain();
+// DynamicsCompressor — gentle 4:1 at -18dB catches chord peaks,
+// plus hard brick-wall limiter at 0dBFS as safety net
+const compressor    = AC.createDynamicsCompressor();
+compressor.threshold.value = -18;
+compressor.knee.value      = 10;
+compressor.ratio.value     = 12;
+compressor.attack.value    = 0.003;
+compressor.release.value   = 0.25;
 const limiterNode   = AC.createDynamicsCompressor();
-limiterNode.threshold.value = -3;
+limiterNode.threshold.value = -1;
 limiterNode.knee.value      = 0;
 limiterNode.ratio.value     = 20;
 limiterNode.attack.value    = 0.001;
 limiterNode.release.value   = 0.05;
 
-masterGain.gain.value = 0.75;
+masterGain.gain.value = 0.85;
 
 // ---- GLOBAL FILTER (tone-shaping, shared) ----
 const filterNode    = AC.createBiquadFilter();
@@ -1135,7 +1214,8 @@ delayToneFilter.connect(delayWet);
 delayDry.connect(masterGain);
 delayWet.connect(masterGain);
 
-masterGain.connect(limiterNode);
+masterGain.connect(compressor);
+compressor.connect(limiterNode);
 limiterNode.connect(AC.destination);
 
 // ---- MIXER GAINS (per-source, pre-drive) ----
@@ -1166,10 +1246,26 @@ noiseGainNode.connect(mixGains.noise);
 const activeVoices = {};
 
 // Dynamic polyphony limiter: scale gain based on voice count to prevent clipping
-function getPolyScale() {
-  const n = Object.keys(activeVoices).length + 1; // +1 for the note being added
-  // Use -3dB per doubling: scale = 1/sqrt(n), capped for musical feel
-  return Math.min(1.0, 1.0 / Math.sqrt(Math.max(1, n)));
+// Returns the correct gain scale for N simultaneous voices: 1/sqrt(N)
+// This is called with the FINAL voice count (after adding/removing the note)
+function polyGainForCount(n) {
+  return 1.0 / Math.sqrt(Math.max(1, n));
+}
+
+// Rescale all currently active voices to match a new total voice count
+// Uses voice.baseGain (the unscaled target at sustain peak) so there's no error accumulation
+function rescaleActiveVoices(totalCount) {
+  const scale = polyGainForCount(totalCount);
+  const now = AC.currentTime;
+  Object.values(activeVoices).forEach(v => {
+    if (!v.vcaGain || !v.baseGain) return;
+    // Only rescale if voice is in sustain (past attack+decay) or in attack/decay phase
+    // We update the scheduled ramp targets proportionally using the stored baseGain
+    const target = v.baseGain * scale;
+    // Smoothly glide to new target — 15ms time constant
+    v.vcaGain.gain.setTargetAtTime(target, now, 0.015);
+    v.scaledGain = target; // track for release calculation
+  });
 }
 
 // FX state
@@ -1293,15 +1389,12 @@ function noteOn(midiNote, velocity) {
   const now   = AC.currentTime;
   const voice = {};
 
-  // Per-voice polyphony scaling to prevent saturation on chords
-  const polyScale = getPolyScale();
-  // Update ALL active voices to rescale (soft downscale)
-  Object.values(activeVoices).forEach(v => {
-    if (v.vcaGain) {
-      const cur = v.vcaGain.gain.value;
-      v.vcaGain.gain.setTargetAtTime(cur * polyScale, now, 0.015);
-    }
-  });
+  // Count AFTER this voice is added
+  const newCount = Object.keys(activeVoices).length + 1;
+  const polyScale = polyGainForCount(newCount);
+
+  // Rescale all already-playing voices to match new count (scale from their baseGain)
+  rescaleActiveVoices(newCount);
 
   // ---- PER-VOICE VCF FILTER ----
   const vcfFilt = AC.createBiquadFilter();
@@ -1320,9 +1413,13 @@ function noteOn(midiNote, velocity) {
     Math.max(20, Math.min(20000, baseCutoff + envRange * S.vcf.sus)), now + S.vcf.atk + S.vcf.dec);
 
   // ---- PER-VOICE VCA GAIN ----
+  // baseGain = unscaled velocity amplitude (used for rescaling later)
+  voice.baseGain  = vel;          // full unscaled target (at sustain: vel * sus)
+  voice.scaledGain = vel * polyScale;  // current target after poly scaling
+
   const vcaGainNode = AC.createGain();
   vcaGainNode.gain.setValueAtTime(0.0001, now);
-  vcaGainNode.gain.linearRampToValueAtTime(vel * polyScale, now + S.vca.atk);
+  vcaGainNode.gain.linearRampToValueAtTime(vel * polyScale,             now + S.vca.atk);
   vcaGainNode.gain.linearRampToValueAtTime(vel * S.vca.sus * polyScale, now + S.vca.atk + S.vca.dec);
   voice.vcaGain = vcaGainNode;
 
@@ -1374,22 +1471,37 @@ function noteOn(midiNote, velocity) {
     voice.osc2gain = g2;
   }
 
-  // ---- RING MOD ----
-  if (S.ring.enabled && voice.osc1 && voice.osc2) {
-    const ringNode = AC.createGain();
-    ringNode.gain.value = 0;
-    if (S.ring.src === 'osc1xosc2') {
-      voice.osc2.connect(ringNode.gain);
-    } else {
-      noiseGainNode.connect(ringNode.gain);
+  // ---- RING MOD (Amplitude Modulation) ----
+  // Signal: osc1 → ringCarrier (gain node)
+  // Modulator: osc2 AudioParam-modulates ringCarrier.gain → creates sum/difference tones
+  // A DC-block gain offset keeps the mod centred around 0 so it's true AM/RM
+  if (S.ring.enabled) {
+    const carrierSrc = S.ring.src === 'osc1xosc2' ? voice.osc1 : voice.osc2;
+    const modSrc     = S.ring.src === 'osc1xosc2' ? voice.osc2 : null; // null = use noise
+
+    if (carrierSrc) {
+      const ringCarrier  = AC.createGain();
+      ringCarrier.gain.value = 0;  // modulator drives this
+
+      // Route carrier audio through the ring node
+      carrierSrc.connect(ringCarrier);
+
+      // Modulator: connect audio-rate signal to the gain AudioParam
+      if (modSrc) {
+        modSrc.connect(ringCarrier.gain);
+      } else {
+        noiseGainNode.connect(ringCarrier.gain);
+      }
+
+      // Output gain (ring amount)
+      const ringOut = AC.createGain();
+      ringOut.gain.value = S.ring.amount;
+      ringCarrier.connect(ringOut);
+      ringOut.connect(voicePreBus);
+
+      voice.ringCarrier = ringCarrier;
+      voice.ringOut     = ringOut;
     }
-    (S.ring.src === 'osc1xosc2' ? voice.osc1 : voice.osc2).connect(ringNode);
-    const ringGainCtrl = AC.createGain();
-    ringGainCtrl.gain.value = S.ring.amount * mixGains.ring.gain.value;
-    ringNode.connect(ringGainCtrl);
-    ringGainCtrl.connect(voicePreBus);
-    voice.ringNode = ringNode;
-    voice.ringGainCtrl = ringGainCtrl;
   }
 
   activeVoices[midiNote] = voice;
@@ -1412,27 +1524,19 @@ function noteOff(midiNote) {
       Math.max(20, baseCutoff * 0.3), now + vcfRel);
   }
 
-  // Per-voice VCA release
+  // Per-voice VCA release — cancel any in-flight ramps, ramp to silence
   if (voice.vcaGain) {
-    const curVol = voice.vcaGain.gain.value;
     voice.vcaGain.gain.cancelScheduledValues(now);
-    voice.vcaGain.gain.setValueAtTime(curVol, now);
-    voice.vcaGain.gain.linearRampToValueAtTime(0.0001, now + vcaRel);
+    // Use scaledGain if available (more accurate than .value which may lag)
+    const curVol = voice.scaledGain || voice.vcaGain.gain.value;
+    voice.vcaGain.gain.setValueAtTime(Math.max(0.0001, curVol), now);
+    voice.vcaGain.gain.exponentialRampToValueAtTime(0.0001, now + vcaRel);
   }
 
-  // Rescale remaining voices slightly upward (within safe ceiling)
-  const remainingVoices = Object.keys(activeVoices).length - 1; // after this one is deleted
-  if (remainingVoices > 0) {
-    const newPolyScale = Math.min(1.0, 1.0 / Math.sqrt(Math.max(1, remainingVoices)));
-    Object.entries(activeVoices).forEach(([note, v]) => {
-      if (parseInt(note) !== midiNote && v.vcaGain) {
-        v.vcaGain.gain.setTargetAtTime(
-          Math.min(1.0, v.vcaGain.gain.value * (1 / getPolyScale()) * newPolyScale),
-          now, 0.02
-        );
-      }
-    });
-  }
+  // Rescale remaining voices using their stored baseGain (no error accumulation)
+  // Count = current voices minus the one being released
+  const remainingCount = Math.max(1, Object.keys(activeVoices).length - 1);
+  rescaleActiveVoices(remainingCount);
 
   // Stop oscillators after release
   [voice.osc1, voice.osc2].filter(Boolean).forEach(o => {
@@ -1447,8 +1551,8 @@ function noteOff(midiNote) {
       if (voice.vcaGain)  voice.vcaGain.disconnect();
       if (voice.osc1gain) voice.osc1gain.disconnect();
       if (voice.osc2gain) voice.osc2gain.disconnect();
-      if (voice.ringNode) { voice.ringNode.disconnect(); }
-      if (voice.ringGainCtrl) voice.ringGainCtrl.disconnect();
+      if (voice.ringCarrier)  { try{voice.ringCarrier.disconnect();}catch(e){} }
+      if (voice.ringOut)      { try{voice.ringOut.disconnect();}catch(e){} }
     } catch(e){}
   }, (vcaRel + 0.2) * 1000);
 
@@ -1456,24 +1560,74 @@ function noteOff(midiNote) {
   updateVoiceCount();
 }
 
-// PWM oscillator: two slightly detuned saws with phase cancel trick
+// PWM oscillator: two detuned sawtooth oscillators with polarity inversion
+// Returns a proxy with connect()/start(t)/stop(t)/detune — behaves like a real OscillatorNode
 function makePWMOsc(freq, pw, detune) {
-  const osc1 = AC.createOscillator();
-  const osc2 = AC.createOscillator();
-  const merger = AC.createGain();
-  const inv = AC.createGain();
+  const osc1   = AC.createOscillator();
+  const osc2   = AC.createOscillator();
+  const inv    = AC.createGain();
+  const merger = AC.createGain();   // output node — connect() targets this
+
   osc1.type = 'sawtooth'; osc1.frequency.value = freq; osc1.detune.value = detune;
   osc2.type = 'sawtooth'; osc2.frequency.value = freq; osc2.detune.value = detune + pw * 1200;
   inv.gain.value = -1;
+
   osc1.connect(merger);
-  osc2.connect(inv); inv.connect(merger);
-  osc1.start(); osc2.start();
-  // Return a proxy object so stop() works on both
-  return { connect: (dst) => merger.connect(dst), stop:(t)=>{ try{osc1.stop(t);osc2.stop(t);}catch(e){} } };
+  osc2.connect(inv);
+  inv.connect(merger);
+  // Do NOT call .start() here — caller controls timing via start(t)
+
+  // Proxy object: mimics OscillatorNode API used in noteOn/noteOff
+  return {
+    _osc1: osc1, _osc2: osc2,           // expose for detune updates
+    connect: (dst) => merger.connect(dst),
+    start:   (t)   => { try{osc1.start(t); osc2.start(t);}catch(e){} },
+    stop:    (t)   => { try{osc1.stop(t);  osc2.stop(t); }catch(e){} },
+    // Fake AudioParam so pitch-bend detune updates work
+    detune: {
+      value: detune,
+      get value() { return osc1.detune.value; },
+      set value(v) { osc1.detune.value = v; osc2.detune.value = v + pw * 1200; }
+    },
+    frequency: {
+      get value() { return osc1.frequency.value; },
+      set value(v) { osc1.frequency.value = v; osc2.frequency.value = v; }
+    }
+  };
 }
 
 function allNotesOff() {
+  // Soft stop via normal noteOff
   Object.keys(activeVoices).forEach(n => noteOff(parseInt(n)));
+}
+
+// PANIC: instant hard stop of everything, no release tails
+function panicStop() {
+  const now = AC.currentTime;
+  // Hard-kill every active voice immediately
+  Object.values(activeVoices).forEach(v => {
+    // Slam VCA to zero
+    if (v.vcaGain) {
+      v.vcaGain.gain.cancelScheduledValues(now);
+      v.vcaGain.gain.setValueAtTime(0, now);
+    }
+    // Stop oscillators right now
+    [v.osc1, v.osc2].filter(Boolean).forEach(o => {
+      try { o.stop(now); } catch(e){}
+    });
+    // Disconnect nodes
+    ['preBus','vcfFilt','vcaGain','osc1gain','osc2gain','ringCarrier','ringOut'].forEach(k => {
+      try { if(v[k]) v[k].disconnect(); } catch(e){}
+    });
+  });
+  // Clear voice map
+  for (const k in activeVoices) delete activeVoices[k];
+  // Reset master gain (in case it was reduced)
+  masterGain.gain.setValueAtTime(0.85, now);
+  masterGain.gain.linearRampToValueAtTime(0.85, now + 0.05);
+  // Clear arpeggiator state
+  if (arpInterval) { clearInterval(arpInterval); arpInterval = null; arpLastNote = -1; arpSeq = []; }
+  updateVoiceCount();
 }
 
 function updateVoiceCount() {
@@ -2445,6 +2599,102 @@ function updateMidiStatusBadge() {
 }
 
 
+
+// ================================================================
+//  VIRTUAL KEYBOARD
+// ================================================================
+let kbBaseOct = 3;       // base octave (C3 = MIDI 48)
+const kbPressed = new Set();
+
+// Key layout for 2.5 octaves (C to F of next octave+1 = 30 keys)
+// [semitoneOffset, isBlack, leftOffset_px_from_white_start]
+// White keys are laid out sequentially; black keys positioned absolutely
+const WHITE_NOTES = [0,2,4,5,7,9,11]; // C D E F G A B
+const BLACK_NOTES = [1,3,6,8,10];     // C# D# F# G# A#
+// Black key positions (x offset in px relative to the white key before it)
+// Pattern per octave: after C(+20), after D(+20), skip E, after F(+20), after G(+20), after A(+20), skip B
+const BLACK_POS = [20, 52, 116, 148, 180]; // px left from octave start (32px white key width)
+
+function buildKeyboard() {
+  const container = document.getElementById('vkb-container');
+  container.innerHTML = '';
+  const baseNote = (kbBaseOct + 1) * 12; // C of baseOct in MIDI (C3=48, C4=60...)
+
+  // Build 2.5 octaves: full oct, full oct, then C D E F (5 white, 3 black)
+  // Total white keys: 7+7+4 = 18; Total black: 5+5+3 = 13
+  const octaves = [0, 1, 2]; // 0=full, 1=full, 2=partial(C..F#)
+  let whiteIdx = 0;
+
+  octaves.forEach(octOffset => {
+    const octStart = baseNote + octOffset * 12;
+    const octPixelLeft = whiteIdx * 32;
+    const notesInOct = octOffset < 2 ? WHITE_NOTES : [0,2,4,5]; // C D E F
+    const blackInOct = octOffset < 2 ? BLACK_NOTES : [1,3,6];   // C# D# F#
+
+    // White keys
+    notesInOct.forEach((semi, i) => {
+      const midi = octStart + semi;
+      const el = document.createElement('div');
+      el.className = 'vkb-white';
+      el.dataset.midi = midi;
+      if (semi === 0) {
+        const label = document.createElement('div');
+        label.className = 'vkb-octlabel';
+        label.textContent = 'C' + (kbBaseOct + octOffset);
+        el.appendChild(label);
+      }
+      setupKeyEvents(el, midi);
+      container.appendChild(el);
+      whiteIdx++;
+    });
+
+    // Black keys (positioned absolutely over white keys)
+    const bpositions = octOffset < 2 ? BLACK_POS : [20, 52, 116]; // C# D# F#
+    blackInOct.forEach((semi, i) => {
+      const midi = octStart + semi;
+      const el = document.createElement('div');
+      el.className = 'vkb-black';
+      el.style.left = (octPixelLeft + bpositions[i]) + 'px';
+      el.dataset.midi = midi;
+      setupKeyEvents(el, midi);
+      container.appendChild(el);
+    });
+  });
+}
+
+function setupKeyEvents(el, midi) {
+  const down = (e) => {
+    e.preventDefault();
+    if (kbPressed.has(midi)) return;
+    kbPressed.add(midi);
+    el.classList.add('pressed');
+    initAudio();
+    if (S.arp.enabled) { arpAddNote(midi); if (!arpSeq.length || arpLastNote<0) startArp(); }
+    else noteOn(midi, 100);
+  };
+  const up = (e) => {
+    e.preventDefault();
+    if (!kbPressed.has(midi)) return;
+    kbPressed.delete(midi);
+    el.classList.remove('pressed');
+    if (S.arp.enabled) arpRemoveNote(midi);
+    else noteOff(midi);
+  };
+  el.addEventListener('mousedown',  down);
+  el.addEventListener('touchstart', down, { passive: false });
+  el.addEventListener('mouseup',    up);
+  el.addEventListener('mouseleave', up);
+  el.addEventListener('touchend',   up);
+  el.addEventListener('touchcancel',up);
+}
+
+function setKbOct(oct, btn) {
+  kbBaseOct = oct;
+  document.querySelectorAll('#kb-oct-pills button').forEach(b => b.classList.remove('sel','blue'));
+  btn.classList.add('sel','blue');
+  buildKeyboard();
+}
+
 // ================================================================
 //  THEME
 // ================================================================
@@ -2460,7 +2710,7 @@ document.getElementById('theme-sw').addEventListener('click', function() {
 //  AUDIO BUTTON
 // ================================================================
 document.getElementById('btn-audio-on').addEventListener('click', initAudio);
-document.getElementById('btn-panic').addEventListener('click', allNotesOff);
+document.getElementById('btn-panic').addEventListener('click', panicStop);
 
 // ================================================================
 //  INIT
@@ -2485,6 +2735,9 @@ window.onload = () => {
 
   document.getElementById('ctx-state').textContent = AC.state.toUpperCase();
   AC.onstatechange = () => { document.getElementById('ctx-state').textContent = AC.state.toUpperCase(); };
+
+  // Build virtual keyboard
+  buildKeyboard();
 
   // Init FX buttons
   document.getElementById('fx-reverb-btn').classList.add('active');
