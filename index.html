@@ -1094,6 +1094,14 @@ input[type=number]:focus { border-color:var(--accent); }
 // ================================================================
 const AC = new (window.AudioContext || window.webkitAudioContext)();
 
+// 1. Añadir un Limiter/Compressor en la cadena Maestra
+const masterCompressor = audioCtx.createDynamicsCompressor();
+masterCompressor.threshold.setValueAtTime(-12, audioCtx.currentTime);
+masterCompressor.knee.setValueAtTime(30, audioCtx.currentTime);
+masterCompressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+masterCompressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+masterCompressor.release.setValueAtTime(0.25, audioCtx.currentTime);
+
 // ---- MASTER / LIMITER ----
 const masterGain    = AC.createGain();
 // DynamicsCompressor — gentle 4:1 at -18dB catches chord peaks,
@@ -1361,6 +1369,29 @@ function makeSaturatorCurve(drive) {
   }
   return curve;
 }
+
+
+function updateMixerGains() {
+    // Escalar los niveles del mezclador para que la suma no exceda 1.0
+    // Basado en el manejo de volumen de synthdrop.html
+    const masterVol = 0.7; // Reducimos el techo maestro un 30%
+    masterGainNode.gain.setTargetAtTime(masterVol, audioCtx.currentTime, 0.02);
+}
+
+function createVoice(note, velocity) {
+    // Calculamos una ganancia máxima permitida por voz (Metodología SynthDrop)
+    // Dividimos la potencia para evitar clipping en polifonía
+    const polyphonyAdjustment = 0.6; 
+    const voiceGain = (velocity / 127) * polyphonyAdjustment;
+
+    const vcaNode = audioCtx.createGain();
+    vcaNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    
+    // Conectar a la cadena de efectos y luego al compresor maestro
+    // En lugar de ir directo a destination:
+    vcaNode.connect(masterCompressor);
+    masterCompressor.connect(audioCtx.destination);
+
 
 // ================================================================
 //  NOTE ON / OFF
